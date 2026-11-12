@@ -9,7 +9,6 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from app.core.config import settings
 from app.db.session import Base
-from app import models  # noqa: F401 - registers all models on Base.metadata
 
 config = context.config
 
@@ -18,7 +17,17 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-config.set_main_option("sqlalchemy.url", settings.SYNC_DATABASE_URL)
+if os.getenv("USE_TEST_DATABASE") == "1":
+    if not settings.TEST_DATABASE_URL:
+        raise RuntimeError(
+            "USE_TEST_DATABASE=1 but TEST_DATABASE_URL is not configured."
+        )
+
+    database_url = settings.TEST_DATABASE_URL.replace("+asyncpg", "")
+else:
+    database_url = settings.SYNC_DATABASE_URL
+
+config.set_main_option("sqlalchemy.url", database_url)
 
 
 def run_migrations_offline() -> None:
