@@ -1,3 +1,4 @@
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -8,6 +9,12 @@ from app.core.logger import logger
 from app.db.session import get_db
 from app.models import Document, DocumentStatus
 from app.schemas.document import DocumentListResponse, DocumentOut
+from app.schemas.processing import ProcessingResult
+from app.services import document_processing
+from app.services.document_processing import (
+    DocumentNotFoundError,
+    ProcessingConflictError,
+)
 from app.services.document_storage import (
     FileTooLargeError,
     UploadValidationError,
@@ -81,3 +88,26 @@ async def list_documents(
         skip=skip,
         limit=limit,
     )
+
+
+@router.post("/{document_id}/process", response_model=ProcessingResult)
+async def process_document_endpoint(
+    document_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await document_processing.process_document(document_id, db)
+    except DocumentNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
+        )
+    except ProcessingConflictError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(e)
+        )
+    except Exception:
+        logger.exception("Document %s processing failed", document_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Document processing failed",
+        )

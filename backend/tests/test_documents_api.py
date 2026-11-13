@@ -8,22 +8,18 @@ from sqlalchemy.engine import make_url
 
 import httpx
 import pytest_asyncio
-from pypdf import PdfWriter
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import settings
 from app.db.session import get_db
 from app.main import app
 from app.models import Document, DocumentStatus
+from tests.test_extraction import make_pdf_bytes as _make_pdf_with_text
 
 
 def make_pdf_bytes() -> bytes:
-    writer = PdfWriter()
-    writer.add_blank_page(width=72, height=72)
-    buf = io.BytesIO()
-    writer.write(buf)
-    return buf.getvalue()
+    return _make_pdf_with_text(["Test document content for processing"])
 
 
 PDF_BYTES = make_pdf_bytes()
@@ -321,3 +317,53 @@ async def test_original_filename_path_traversal_safe(env):
     files = list(env.storage_dir.glob("*.pdf"))
     assert len(files) == 1
     assert files[0].parent == env.storage_dir
+
+
+async def test_process_document_success(env):
+    response = await upload(env.client, "test-process.pdf", PDF_BYTES)
+    assert response.status_code == 201
+    data = track(env, response)
+
+    response = await env.client.post(f"/api/v1/documents/{data['id']}/process")
+    assert response.status_code == 200
+    result = response.json()
+    assert result["document_id"] == data["id"]
+    assert result["document_status"] == "completed"
+    assert result["attempt_number"] == 1
+    assert result["processing_status"] == "completed"
+    assert result["chunks_created"] >= 1
+    assert result["error_message"] is None
+
+
+async def test_process_missing_document_404(env):
+    response = await env.client.post(f"/api/v1/documents/{uuid.uuid4()}/process")
+    assert response.status_code == 404
+
+
+async def test_process_completed_document_409(env):
+    response = await upload(env.client, "test-twice.pdf", PDF_BYTES)
+    assert response.status_code == 201
+    data = track(env, response)
+
+    response = await env.client.post(f"/api/v1/documents/{data['id']}/process")
+    assert response.status_code == 200
+
+    response = await env.client.post(f"/api/v1/documents/{data['id']}/process")
+    assert response.status_code == 409
+
+
+async def test_process_already_processing_409(env):
+    response = await upload(env.client, "test-busy.pdf", PDF_BYTES)
+    assert response.status_code == 201
+    data = track(env, response)
+
+    async with env.factory() as session:
+        await session.execute(
+            update(Document)
+            .where(Document.id == uuid.UUID(data["id"]))
+            .values(status=DocumentStatus.PROCESSING)
+        )
+        await session.commit()
+
+    response = await env.client.post(f"/api/v1/documents/{data['id']}/process")
+    assert response.status_code == 409
