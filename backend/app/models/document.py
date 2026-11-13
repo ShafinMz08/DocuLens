@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Enum, String, func
+from sqlalchemy import BigInteger, DateTime, Enum, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -11,6 +11,13 @@ from app.db.session import Base
 
 class DocumentStatus(str, enum.Enum):
     UPLOADED = "uploaded"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class EmbeddingStatus(str, enum.Enum):
+    PENDING = "pending"
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -39,6 +46,21 @@ class Document(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    embedding_status: Mapped[EmbeddingStatus] = mapped_column(
+        Enum(
+            EmbeddingStatus,
+            values_callable=lambda members: [m.value for m in members],
+        ),
+        default=EmbeddingStatus.PENDING,
+    )
+    embedding_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    embedding_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    embedded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     chunks: Mapped[list["DocumentChunk"]] = relationship(

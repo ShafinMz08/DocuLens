@@ -9,6 +9,7 @@ from app.core.logger import logger
 from app.core.redis import close_redis
 from app.api.health import router as health_router
 from app.api.documents import router as documents_router
+from app.api.search import router as search_router
 
 
 @asynccontextmanager
@@ -44,4 +45,9 @@ app.include_router(
     documents_router,
     prefix="/api/v1/documents",
     tags=["documents"],
+)
+app.include_router(
+    search_router,
+    prefix="/api/v1/search",
+    tags=["search"],
 )

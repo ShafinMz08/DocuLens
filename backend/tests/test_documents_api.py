@@ -15,6 +15,7 @@ from app.core.config import settings
 from app.db.session import get_db
 from app.main import app
 from app.models import Document, DocumentStatus
+from app.services import embeddings
 from tests.test_extraction import make_pdf_bytes as _make_pdf_with_text
 
 
@@ -367,3 +368,150 @@ async def test_process_already_processing_409(env):
 
     response = await env.client.post(f"/api/v1/documents/{data['id']}/process")
     assert response.status_code == 409
+
+
+def _fake_embedder():
+    async def fake(texts):
+        vecs = []
+        for i, _ in enumerate(texts):
+            vec = [0.0] * settings.EMBEDDING_DIMENSIONS
+            vec[i % settings.EMBEDDING_DIMENSIONS] = 1.0
+            vecs.append(vec)
+        return vecs
+
+    return fake
+
+
+async def _processed_document(env, monkeypatch, filename="test-embed.pdf"):
+    monkeypatch.setattr(embeddings, "embed_texts", _fake_embedder())
+    response = await upload(env.client, filename, PDF_BYTES)
+    assert response.status_code == 201
+    data = track(env, response)
+
+    response = await env.client.post(f"/api/v1/documents/{data['id']}/process")
+    assert response.status_code == 200
+    return data
+
+
+async def test_embed_document_success(env, monkeypatch):
+    data = await _processed_document(env, monkeypatch)
+
+    response = await env.client.post(f"/api/v1/documents/{data['id']}/embed")
+    assert response.status_code == 200
+    result = response.json()
+    assert result["document_id"] == data["id"]
+    assert result["embedding_status"] == "completed"
+    assert result["embedding_model"].endswith("@1")
+    assert result["total_chunks"] >= 1
+    assert result["embedded_chunks"] == result["total_chunks"]
+    assert result["skipped_chunks"] == 0
+    assert result["error_message"] is None
+
+    # repeat request is safe and idempotent
+    response = await env.client.post(f"/api/v1/documents/{data['id']}/embed")
+    assert response.status_code == 200
+    assert response.json()["embedding_status"] == "completed"
+
+
+async def test_embed_missing_document_404(env):
+    response = await env.client.post(f"/api/v1/documents/{uuid.uuid4()}/embed")
+    assert response.status_code == 404
+
+
+async def test_embed_unprocessed_document_409(env):
+    response = await upload(env.client, "test-notprocessed.pdf", PDF_BYTES)
+    assert response.status_code == 201
+    data = track(env, response)
+
+    response = await env.client.post(f"/api/v1/documents/{data['id']}/embed")
+    assert response.status_code == 409
+
+
+async def test_embed_failure_returns_500(env, monkeypatch):
+    data = await _processed_document(env, monkeypatch)
+
+    async def boom(_texts):
+        raise RuntimeError("model failure")
+
+    monkeypatch.setattr(embeddings, "embed_texts", boom)
+    response = await env.client.post(f"/api/v1/documents/{data['id']}/embed")
+    assert response.status_code == 500
+    assert "model failure" not in response.text
+
+    async with env.factory() as session:
+        doc = await session.scalar(
+            select(Document).where(Document.id == uuid.UUID(data["id"]))
+        )
+        assert doc.embedding_status.value == "failed"
+        assert "model failure" in doc.embedding_error
+
+
+async def test_semantic_search_endpoint(env, monkeypatch):
+    data = await _processed_document(env, monkeypatch, "test-search.pdf")
+
+    response = await env.client.post(f"/api/v1/documents/{data['id']}/embed")
+    assert response.status_code == 200
+
+    async def query_embed(texts):
+        vec = [0.0] * settings.EMBEDDING_DIMENSIONS
+        vec[0] = 1.0
+        return [vec for _ in texts]
+
+    monkeypatch.setattr(embeddings, "embed_texts", query_embed)
+
+    response = await env.client.post(
+        "/api/v1/search", json={"query": "test document content", "top_k": 5}
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["query"] == "test document content"
+    assert len(payload["results"]) >= 1
+    first = payload["results"][0]
+    assert first["document_id"] == data["id"]
+    assert first["document_name"] == "test-search.pdf"
+    assert "content" in first
+    assert "score" in first
+    assert "embedding" not in first
+
+    scores = [r["score"] for r in payload["results"]]
+    assert scores == sorted(scores, reverse=True)
+
+
+async def test_semantic_search_document_filter(env, monkeypatch):
+    data_a = await _processed_document(env, monkeypatch, "test-sa.pdf")
+    data_b = await _processed_document(env, monkeypatch, "test-sb.pdf")
+
+    for d in (data_a, data_b):
+        response = await env.client.post(f"/api/v1/documents/{d['id']}/embed")
+        assert response.status_code == 200
+
+    async def query_embed(texts):
+        vec = [0.0] * settings.EMBEDDING_DIMENSIONS
+        vec[0] = 1.0
+        return [vec for _ in texts]
+
+    monkeypatch.setattr(embeddings, "embed_texts", query_embed)
+
+    response = await env.client.post(
+        "/api/v1/search",
+        json={"query": "anything", "document_id": data_a["id"]},
+    )
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert results
+    assert all(r["document_id"] == data_a["id"] for r in results)
+
+
+async def test_semantic_search_validation(env):
+    response = await env.client.post("/api/v1/search", json={"query": "   "})
+    assert response.status_code == 422
+
+    response = await env.client.post(
+        "/api/v1/search", json={"query": "ok", "top_k": 0}
+    )
+    assert response.status_code == 422
+
+    response = await env.client.post(
+        "/api/v1/search", json={"query": "ok", "top_k": 100}
+    )
+    assert response.status_code == 422

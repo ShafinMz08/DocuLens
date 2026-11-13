@@ -1,7 +1,10 @@
 
 services:
   postgres:
-    image: postgres:16-alpine
+    build:
+      context: ./docker/postgres
+      dockerfile: Dockerfile
+    image: doculens-postgres:16-pgvector
     container_name: doculens-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
@@ -44,6 +47,12 @@ services:
       LOG_LEVEL: ${LOG_LEVEL}
       DOCUMENT_STORAGE_DIR: ${DOCUMENT_STORAGE_DIR}
       MAX_UPLOAD_SIZE_BYTES: ${MAX_UPLOAD_SIZE_BYTES}
+      EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME:-BAAI/bge-small-en-v1.5}
+      EMBEDDING_MODEL_VERSION: ${EMBEDDING_MODEL_VERSION:-1}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-384}
+      EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-64}
+      EMBEDDING_STALE_SECONDS: ${EMBEDDING_STALE_SECONDS:-3600}
+      FASTEMBED_CACHE_DIR: ${FASTEMBED_CACHE_DIR:-/app/storage/fastembed}
     depends_on:
       postgres:
         condition: service_healthy
@@ -52,6 +61,7 @@ services:
     volumes:
       - ./backend:/app
       - ./storage/documents:/app/storage/documents
+      - ./storage/fastembed:/app/storage/fastembed
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     restart: unless-stopped
 

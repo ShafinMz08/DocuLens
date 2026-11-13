@@ -10,10 +10,16 @@ from app.db.session import get_db
 from app.models import Document, DocumentStatus
 from app.schemas.document import DocumentListResponse, DocumentOut
 from app.schemas.processing import ProcessingResult
-from app.services import document_processing
+from app.schemas.search import EmbeddingResult
+from app.services import document_processing, embeddings
 from app.services.document_processing import (
     DocumentNotFoundError,
     ProcessingConflictError,
+)
+from app.services.embeddings import (
+    EmbeddingConflictError,
+    EmbeddingError,
+    EmbeddingNotReadyError,
 )
 from app.services.document_storage import (
     FileTooLargeError,
@@ -110,4 +116,31 @@ async def process_document_endpoint(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Document processing failed",
+        )
+
+
+@router.post("/{document_id}/embed", response_model=EmbeddingResult)
+async def embed_document_endpoint(
+    document_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await embeddings.embed_document(document_id, db)
+    except DocumentNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
+        )
+    except EmbeddingNotReadyError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(e)
+        )
+    except EmbeddingConflictError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(e)
+        )
+    except EmbeddingError:
+        logger.exception("Document %s embedding failed", document_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Document embedding failed",
         )

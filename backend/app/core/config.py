@@ -24,5 +24,12 @@ class Settings(BaseSettings):
     DOCUMENT_STORAGE_DIR: str = "/app/storage/documents"
     MAX_UPLOAD_SIZE_BYTES: int = 20 * 1024 * 1024
 
+    EMBEDDING_MODEL_NAME: str = "BAAI/bge-small-en-v1.5"
+    EMBEDDING_MODEL_VERSION: str = "1"
+    EMBEDDING_DIMENSIONS: int = 384
+    EMBEDDING_BATCH_SIZE: int = 64
+    EMBEDDING_STALE_SECONDS: int = 3600
+    FASTEMBED_CACHE_DIR: str = "/app/storage/fastembed"
+
 
 settings = Settings()
