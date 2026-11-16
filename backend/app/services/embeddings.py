@@ -27,7 +27,21 @@ class EmbeddingConflictError(Exception):
 
 
 class EmbeddingError(Exception):
-    pass
+    """Embedding failed. Carries best-effort persisted chunk counts so
+    callers can report partial progress accurately."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        embedded_chunks: int | None = None,
+        total_chunks: int | None = None,
+        skipped_chunks: int | None = None,
+    ):
+        super().__init__(message)
+        self.embedded_chunks = embedded_chunks
+        self.total_chunks = total_chunks
+        self.skipped_chunks = skipped_chunks
 
 
 _model = None
@@ -187,7 +201,18 @@ async def embed_document(document_id: uuid.UUID, db: AsyncSession):
             "Embedding failed for document %s: %s", document_id, message
         )
         await _fail_embedding(db, document_id, message)
-        raise EmbeddingError(message) from e
+        try:
+            total, embedded, skipped = await _chunk_counts(
+                db, document_id, model_key
+            )
+        except Exception:
+            total = embedded = skipped = None
+        raise EmbeddingError(
+            message,
+            embedded_chunks=embedded,
+            total_chunks=total,
+            skipped_chunks=skipped,
+        ) from e
 
     return EmbeddingResult(
         document_id=document_id,

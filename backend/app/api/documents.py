@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logger import logger
 from app.db.session import get_db
-from app.models import Document, DocumentStatus
+from app.models import Document, DocumentStatus, EmbeddingStatus
 from app.schemas.document import DocumentListResponse, DocumentOut
 from app.schemas.processing import ProcessingResult
 from app.schemas.search import EmbeddingResult
@@ -102,7 +102,7 @@ async def process_document_endpoint(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        return await document_processing.process_document(document_id, db)
+        result = await document_processing.process_document(document_id, db)
     except DocumentNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
@@ -117,6 +117,47 @@ async def process_document_endpoint(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Document processing failed",
         )
+
+    # Automatically embed the freshly persisted chunks. An embedding
+    # failure never fails extraction: chunks stay persisted and the
+    # outcome is reported through the embedding fields.
+    embedding_fields = {
+        "embedding_status": EmbeddingStatus.PENDING,
+        "embedded_chunks": 0,
+        "total_chunks": result.chunks_created,
+        "skipped_chunks": None,
+        "embedding_error": None,
+    }
+    try:
+        embedding = await embeddings.embed_document(document_id, db)
+        embedding_fields = {
+            "embedding_status": embedding.embedding_status,
+            "embedded_chunks": embedding.embedded_chunks,
+            "total_chunks": embedding.total_chunks,
+            "skipped_chunks": embedding.skipped_chunks,
+            "embedding_error": embedding.error_message,
+        }
+    except embeddings.EmbeddingConflictError:
+        embedding_fields["embedding_status"] = EmbeddingStatus.PROCESSING
+    except embeddings.EmbeddingError as e:
+        logger.exception(
+            "Automatic embedding failed for document %s", document_id
+        )
+        embedding_fields.update(
+            {
+                "embedding_status": EmbeddingStatus.FAILED,
+                "embedded_chunks": e.embedded_chunks or 0,
+                "total_chunks": (
+                    e.total_chunks
+                    if e.total_chunks is not None
+                    else result.chunks_created
+                ),
+                "skipped_chunks": e.skipped_chunks,
+                "embedding_error": "Embedding generation failed",
+            }
+        )
+
+    return result.model_copy(update=embedding_fields)
 
 
 @router.post("/{document_id}/embed", response_model=EmbeddingResult)

@@ -332,8 +332,12 @@ async def test_embed_document_partial_failure_then_retry(
     monkeypatch.setattr(embeddings, "embed_texts", flaky)
 
     try:
-        with pytest.raises(EmbeddingError):
+        with pytest.raises(EmbeddingError) as excinfo:
             await embed_document(doc_id, db_session)
+
+        # partial progress is reported on the exception
+        assert excinfo.value.embedded_chunks == 2
+        assert excinfo.value.total_chunks == 4
 
         doc = await _get_document(db_session, doc_id)
         assert doc.embedding_status == EmbeddingStatus.FAILED
