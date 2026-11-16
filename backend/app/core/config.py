@@ -31,5 +31,23 @@ class Settings(BaseSettings):
     EMBEDDING_STALE_SECONDS: int = 3600
     FASTEMBED_CACHE_DIR: str = "/app/storage/fastembed"
 
+    # LLM providers
+    GEMINI_API_KEY: str | None = None
+    GEMINI_MODEL: str = "gemini-2.5-flash"
+    GROQ_API_KEY: str | None = None
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    LLM_PRIMARY_PROVIDER: str = "gemini"
+    LLM_FALLBACK_PROVIDER: str | None = "groq"
+    LLM_TEMPERATURE: float = 0.2
+    LLM_MAX_OUTPUT_TOKENS: int = 1024
+    LLM_TIMEOUT_SECONDS: float = 60.0
+
+    # RAG / chat
+    RAG_TOP_K: int = 6
+    RAG_MIN_SIMILARITY: float = 0.2
+    RAG_MAX_CONTEXT_CHARS: int = 12000
+    CHAT_HISTORY_LIMIT: int = 10
+    CHAT_MAX_QUESTION_LENGTH: int = 4000
+
 
 settings = Settings()

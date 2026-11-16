@@ -7,6 +7,9 @@ DocuLens is an AI-powered document intelligence platform that enables intelligen
 - Document upload, text extraction, and chunking
 - Local CPU embeddings via FastEmbed (`BAAI/bge-small-en-v1.5`, 384 dimensions, pgvector)
 - Semantic search over document chunks with cosine similarity
+- Document-grounded question answering with source citations
+- Persistent conversations with follow-up questions
+- Gemini primary LLM with Groq fallback (official SDKs, no keys required for tests)
 - Scalable architecture with FastAPI, PostgreSQL + pgvector, and Redis
 
 ## Quick Start
@@ -138,6 +141,83 @@ See `.env.example`. Notable settings:
   is treated as interrupted and may be retried (default 3600).
 - `FASTEMBED_CACHE_DIR` — model cache location (default
   `/app/storage/fastembed`).
+
+## Question Answering & Conversations (Phase 4)
+
+DocuLens answers natural-language questions grounded in your uploaded,
+processed, and embedded documents.
+
+### LLM providers
+
+Two providers are supported behind a common interface:
+
+- **Gemini** (primary) — official `google-genai` SDK, default model
+  `gemini-2.5-flash`.
+- **Groq** (fallback) — official `groq` SDK, default model
+  `llama-3.3-70b-versatile`.
+
+Get keys at <https://aistudio.google.com/apikey> (Gemini) and
+<https://console.groq.com/keys> (Groq), then set `GEMINI_API_KEY` and/or
+`GROQ_API_KEY` in `.env`. Provider order, model names, temperature, max
+output tokens, and timeout are configurable (see `.env.example`).
+
+**Fallback behavior:** the primary provider is tried first. Recoverable
+failures — rate limits (429), server errors (5xx), timeouts, connection
+errors, and authentication problems — fall through to the fallback
+provider. Request-level errors (bad request, unknown model) and missing
+credentials do not trigger a fallback. If every configured provider fails,
+the API returns `502` with a safe message; answers are never fabricated to
+mask provider failure. The provider and model actually used are reported
+in the response metadata and stored on the assistant message.
+
+### Asking questions
+
+```bash
+curl -X POST http://localhost:8002/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What are the technical skills listed?"}'
+```
+
+Optional fields: `document_id` (restrict retrieval to one document) and
+`conversation_id` (continue an existing conversation — omit to start a new
+one). The response contains:
+
+- `answer` — the generated, document-grounded response.
+- `conversation_id` — pass it back to ask follow-up questions.
+- `citations` — source references (document ID, filename, page number when
+  known, chunk index, excerpt, similarity score) for the retrieved chunks
+  that support the answer. Page numbers are `null` when unavailable.
+- `provider` / `model` — which LLM actually answered.
+- `retrieved_chunks` — how many chunks were included in the context.
+
+The system prompt requires the model to cite sources inline (`[1]`, `[2]`,
+...) and to say clearly when the documents lack the information. Document
+excerpts are treated as untrusted data — instructions embedded in uploaded
+files cannot change the assistant's behavior.
+
+### Conversation history
+
+```bash
+# list conversations
+curl http://localhost:8002/api/v1/conversations
+
+# get a conversation with all messages
+curl http://localhost:8002/api/v1/conversations/{conversation_id}
+```
+
+Only the most recent `CHAT_HISTORY_LIMIT` messages are sent to the LLM;
+older history is stored but not re-sent. Prior assistant answers are treated
+as conversational context, not as verified document evidence.
+
+### Retrieval & context limits
+
+Chat retrieval reuses the Phase 3 pgvector pipeline: the question is
+embedded with the same FastEmbed model, and the top `RAG_TOP_K` chunks by
+cosine similarity are fetched (optionally filtered by `document_id`).
+Chunks scoring below `RAG_MIN_SIMILARITY` are excluded; if nothing clears
+the threshold the API returns an honest "no relevant information" answer
+without calling the LLM. Context is assembled under `RAG_MAX_CONTEXT_CHARS`
+with duplicate chunks removed.
 
 ## License
 
