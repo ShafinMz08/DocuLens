@@ -3,7 +3,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
-from app.models import DocumentStatus
+from app.models import DocumentStatus, EmbeddingStatus
 
 
 class DocumentOut(BaseModel):
@@ -14,6 +14,8 @@ class DocumentOut(BaseModel):
     content_type: str
     file_size_bytes: int
     status: DocumentStatus
+    embedding_status: EmbeddingStatus
+    embedding_error: str | None
     created_at: datetime
     updated_at: datetime
 

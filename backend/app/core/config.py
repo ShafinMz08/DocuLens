@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8000
 
+    # Comma-separated list of allowed frontend origins for CORS.
+    CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
+
     DOCUMENT_STORAGE_DIR: str = "/app/storage/documents"
     MAX_UPLOAD_SIZE_BYTES: int = 20 * 1024 * 1024
 
@@ -33,13 +36,13 @@ class Settings(BaseSettings):
 
     # LLM providers
     GEMINI_API_KEY: str | None = None
-    GEMINI_MODEL: str = "gemini-2.5-flash"
+    GEMINI_MODEL: str = "gemini-3.8-flash"
     GROQ_API_KEY: str | None = None
-    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_MODEL: str = "openai/gpt-oss-120b"
     LLM_PRIMARY_PROVIDER: str = "gemini"
     LLM_FALLBACK_PROVIDER: str | None = "groq"
     LLM_TEMPERATURE: float = 0.2
-    LLM_MAX_OUTPUT_TOKENS: int = 1024
+    LLM_MAX_OUTPUT_TOKENS: int = 2048
     LLM_TIMEOUT_SECONDS: float = 60.0
 
     # RAG / chat

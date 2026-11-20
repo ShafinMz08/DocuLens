@@ -3,6 +3,7 @@ import uuid
 import pytest
 import pytest_asyncio
 from sqlalchemy import delete, func, select
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -19,11 +20,33 @@ from app.models import (
 
 @pytest_asyncio.fixture
 async def db_session():
-    engine = create_async_engine(settings.DATABASE_URL)
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with factory() as session:
-        yield session
-    await engine.dispose()
+    test_database_url = settings.TEST_DATABASE_URL
+
+    if not test_database_url:
+        raise RuntimeError(
+            "TEST_DATABASE_URL is required. Refusing to run tests."
+        )
+
+    test_database_name = make_url(test_database_url).database
+
+    if test_database_name != "doculens_test":
+        raise RuntimeError(
+            f"Unsafe test database: {test_database_name}. "
+            "Expected doculens_test."
+        )
+
+    engine = create_async_engine(test_database_url)
+    factory = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+    try:
+        async with factory() as session:
+            yield session
+    finally:
+        await engine.dispose()
 
 
 def _make_document(**overrides) -> Document:

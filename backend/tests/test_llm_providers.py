@@ -68,6 +68,9 @@ async def test_gemini_success():
     call = client.models.calls[0]
     # system message mapped to system_instruction, user to "user" role
     assert call["config"].system_instruction == "You are helpful."
+    assert call["config"].temperature == 0.2
+    assert call["config"].max_output_tokens == 100
+    assert call["config"].http_options.timeout == 5000
     assert call["contents"][0].role == "user"
     assert call["contents"][0].parts[0].text == "What is in the docs?"
 
@@ -158,6 +161,9 @@ async def test_groq_success():
     assert resp.model == "groq-test"
     call = client.chat.completions.calls[0]
     assert call["model"] == "groq-test"
+    assert call["temperature"] == 0.2
+    assert call["max_tokens"] == 100
+    assert call["timeout"] == 5
     assert call["messages"][0] == {"role": "system", "content": "You are helpful."}
     assert call["messages"][1]["role"] == "user"
 
